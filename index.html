@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <base href="https://cdn.jsdelivr.net/gh/Reeyuki/PlagueIncEvolved/">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Plague Inc Evolved Reeyuki</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #231F20;
+      }
+
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #unity-canvas {
+        width: 100vw;
+        height: 100vh;
+        background: #231F20;
+        display: none;
+      }
+
+      #unity-loader {
+        position: absolute;
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #231F20;
+        gap: 18px;
+      }
+
+      #unity-loader-title {
+        color: #c8c0b0;
+        font-family: sans-serif;
+        font-size: 18px;
+        letter-spacing: 0.04em;
+      }
+
+      #unity-progress-track {
+        width: 50vw;
+        max-width: 600px;
+        height: 10px;
+        background: #3a3435;
+        border-radius: 5px;
+        overflow: hidden;
+      }
+
+      #unity-progress-bar-fill {
+        height: 100%;
+        width: 0%;
+        background: #b85c38;
+        border-radius: 5px;
+        transition: width 0.15s ease;
+      }
+
+      #unity-progress-label {
+        color: #9a8e88;
+        font-family: monospace;
+        font-size: 13px;
+        letter-spacing: 0.02em;
+      }
+
+      #unity-load-error {
+        display: none;
+        color: #e06050;
+        font-family: sans-serif;
+        font-size: 14px;
+        max-width: 480px;
+        text-align: center;
+      }
+
+      #fullscreen-btn {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        z-index: 9999;
+        padding: 10px 14px;
+        background: #3a3435;
+        color: #c8c0b0;
+        border: 1px solid #5a5051;
+        border-radius: 6px;
+        cursor: pointer;
+        font-family: sans-serif;
+      }
+    </style>
+  </head>
+
+  <body>
+    <button id="fullscreen-btn">Fullscreen</button>
+
+    <div id="unity-loader">
+      <div id="unity-loader-title">Plague Inc: Evolved</div>
+      <div id="unity-progress-track">
+        <div id="unity-progress-bar-fill"></div>
+      </div>
+      <div id="unity-progress-label">0 MB / 0 MB</div>
+      <div id="unity-load-error"></div>
+    </div>
+
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+
+    <script src="Build/bb0d9ecdb05db3e84da20bd14a4f84dc.loader.js"></script>
+
+    <script>
+      const BASE = "https://cdn.jsdelivr.net/gh/wasm-rip/PlagueIncEvolved/"
+      async function fetchChunks(manifestUrl, onProgress) {
+        const manifestResp = await fetch(manifestUrl);
+        if (!manifestResp.ok) throw new Error(`Failed to load manifest: ${manifestResp.status}`);
+        const manifest = await manifestResp.json();
+
+        const totalBytes = manifest.files.reduce((sum, f) => sum + f.totalSize, 0);
+        let downloadedBytes = 0;
+        const resolvedFiles = {};
+
+        for (const fileEntry of manifest.files) {
+          const chunks = [];
+
+          for (const part of fileEntry.parts) {
+            const resp = await fetch(BASE + "Build/" + part.file)
+            if (!resp.ok) throw new Error(`Failed to fetch ${part.file}: ${resp.status}`);
+
+            const reader = resp.body.getReader();
+            const partChunks = [];
+            let partReceived = 0;
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              partChunks.push(value);
+              partReceived += value.length;
+              downloadedBytes += value.length;
+              if (onProgress) onProgress(downloadedBytes, totalBytes);
+            }
+
+            const partBuffer = new Uint8Array(part.size);
+            let offset = 0;
+            for (const chunk of partChunks) {
+              partBuffer.set(chunk, offset);
+              offset += chunk.length;
+            }
+            chunks.push(partBuffer);
+          }
+
+          const totalFileSize = chunks.reduce((s, c) => s + c.length, 0);
+          const assembled = new Uint8Array(totalFileSize);
+          let pos = 0;
+
+          for (const chunk of chunks) {
+            assembled.set(chunk, pos);
+            pos += chunk.length;
+          }
+
+          resolvedFiles[fileEntry.name] = URL.createObjectURL(new Blob([assembled]));
+        }
+
+        return resolvedFiles;
+      }
+
+      function formatBytes(bytes) {
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+
+      function updateProgressBar(downloaded, total) {
+        const pct = total > 0 ? Math.min(100, (downloaded / total) * 100) : 0;
+        const bar = document.getElementById('unity-progress-bar-fill');
+        const label = document.getElementById('unity-progress-label');
+
+        if (bar) bar.style.width = pct + '%';
+        if (label) label.textContent = formatBytes(downloaded) + ' / ' + formatBytes(total);
+      }
+
+      async function loadUnity(config) {
+        const loader = document.getElementById('unity-loader');
+        const canvas = document.getElementById('unity-canvas');
+
+        if (loader) loader.style.display = 'flex';
+        if (canvas) canvas.style.display = 'none';
+
+        let resolvedFiles;
+
+        try {
+          resolvedFiles = await fetchChunks('Build/chunk_manifest.json', updateProgressBar);
+        } catch (err) {
+          const errEl = document.getElementById('unity-load-error');
+          if (errEl) {
+            errEl.textContent = 'Failed to load game: ' + err.message;
+            errEl.style.display = 'block';
+          }
+          throw err;
+        }
+
+        const finalConfig = Object.assign({}, config);
+
+        for (const [name, url] of Object.entries(resolvedFiles)) {
+          if (name.endsWith('.data')) finalConfig.dataUrl = url;
+          else if (name.endsWith('.wasm')) finalConfig.codeUrl = url;
+        }
+
+        if (loader) loader.style.display = 'none';
+        if (canvas) canvas.style.display = 'block';
+
+        return createUnityInstance(canvas, finalConfig);
+      }
+
+      function toggleFullscreen(element) {
+        if (!document.fullscreenElement) {
+          if (element.requestFullscreen) element.requestFullscreen();
+          else if (element.webkitRequestFullscreen) element.webkitRequestFullscreen();
+          else if (element.msRequestFullscreen) element.msRequestFullscreen();
+        } else {
+          if (document.exitFullscreen) document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+          else if (document.msExitFullscreen) document.msExitFullscreen();
+        }
+      }
+
+      document.getElementById('fullscreen-btn').addEventListener('click', () => {
+        toggleFullscreen(document.documentElement);
+      });
+    </script>
+
+    <script>
+      (function() {
+        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+          var meta = document.createElement('meta');
+          meta.name = 'viewport';
+          meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+          document.getElementsByTagName('head')[0].appendChild(meta);
+
+          var canvas = document.getElementById('unity-canvas');
+          canvas.style.position = 'fixed';
+        }
+        WebAssembly.instantiateStreaming = undefined;
+        loadUnity({
+          frameworkUrl: "Build/245c322b691cf5c1ae56fe216fda574e.framework.js",
+          streamingAssetsUrl: BASE+"StreamingAssets",
+          companyName: "Ndemic Creations",
+          productName: "Plague Inc Evolved",
+          productVersion: "1.18.3.2"
+        });
+      })();
+    </script>
+  </body>
+</html>
