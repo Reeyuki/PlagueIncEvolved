@@ -51,7 +51,7 @@ html, body {
 <body>
 
 <div id="loader">
-  <div id="text">0 MB / ? MB</div>
+  <div id="text">0 MB / 300 MB</div>
   <div id="bar"><div id="fill"></div></div>
 </div>
 
@@ -73,46 +73,56 @@ function update() {
   document.getElementById("fill").style.width = (loaded / totalGuess * 100) + "%"
 }
 
-async function fetchPart(file, i) {
-  const url = baseBuild + file + ".part" + String(i).padStart(2, "0")
+async function fetchPart(url) {
   const res = await fetch(url)
   if (!res.ok) return null
-
   const buf = await res.arrayBuffer()
   loaded += buf.byteLength
   update()
   return new Uint8Array(buf)
 }
 
-async function loadFile(file) {
-  const first = await fetchPart(file, 0)
-  if (!first) return null
+/* CONFIG ONLY */
+const files = [
+  { name: "1605eb800a276784e4a31d7e08c292ca.wasm", parts: 2 },
+  { name: "c68552511e0497caf31a2ee65f4f53e3.data", parts: 15 }
+]
 
-  const parts = [first]
-
-  for (let i = 1; ; i++) {
-    const p = await fetchPart(file, i)
-    if (!p) break
-    parts.push(p)
+function buildUrls(file) {
+  const urls = []
+  for (let i = 0; i < file.parts; i++) {
+    urls.push(baseBuild + file.name + ".part" + String(i).padStart(2, "0"))
   }
+  return urls
+}
+
+async function loadFile(file) {
+  const urls = buildUrls(file)
+
+  const buffers = await Promise.all(urls.map(fetchPart))
 
   let size = 0
-  for (const p of parts) size += p.length
+  for (const b of buffers) size += b.byteLength
 
   const out = new Uint8Array(size)
   let off = 0
 
-  for (const p of parts) {
-    out.set(p, off)
-    off += p.length
+  for (const b of buffers) {
+    out.set(b, off)
+    off += b.byteLength
   }
 
   return out.buffer
 }
 
 async function start() {
-  const wasm = await loadFile("1605eb800a276784e4a31d7e08c292ca.wasm")
-  const data = await loadFile("c68552511e0497caf31a2ee65f4f53e3.data")
+  const wasmFile = files[0]
+  const dataFile = files[1]
+
+  const wasmPromise = loadFile(wasmFile)
+  const dataPromise = loadFile(dataFile)
+
+  const [wasm, data] = await Promise.all([wasmPromise, dataPromise])
 
   const wasmUrl = URL.createObjectURL(new Blob([wasm], { type: "application/wasm" }))
   const dataUrl = URL.createObjectURL(new Blob([data]))
