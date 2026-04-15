@@ -1,256 +1,137 @@
 <!DOCTYPE html>
 <html lang="en-us">
-  <head>
-    <meta charset="utf-8">
-    <base href="https://cdn.jsdelivr.net/gh/Reeyuki/PlagueIncEvolved/">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Plague Inc Evolved Reeyuki</title>
-    <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<base href="https://cdn.jsdelivr.net/gh/wasm-rip/PlagueIncEvolved/">
+<title>Plague Inc</title>
 
-      html, body {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #231F20;
-      }
+<style>
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: black;
+}
 
-      body {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
+#unity-canvas {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
 
-      #unity-canvas {
-        width: 100vw;
-        height: 100vh;
-        background: #231F20;
-        display: none;
-      }
+#loader {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #0b0b0b;
+  color: white;
+  font-family: sans-serif;
+}
 
-      #unity-loader {
-        position: absolute;
-        width: 100vw;
-        height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        background: #231F20;
-        gap: 18px;
-      }
+#bar {
+  width: 60%;
+  height: 12px;
+  background: #333;
+}
 
-      #unity-loader-title {
-        color: #c8c0b0;
-        font-family: sans-serif;
-        font-size: 18px;
-        letter-spacing: 0.04em;
-      }
+#fill {
+  height: 100%;
+  width: 0%;
+  background: #4caf50;
+}
+</style>
+</head>
 
-      #unity-progress-track {
-        width: 50vw;
-        max-width: 600px;
-        height: 10px;
-        background: #3a3435;
-        border-radius: 5px;
-        overflow: hidden;
-      }
+<body>
 
-      #unity-progress-bar-fill {
-        height: 100%;
-        width: 0%;
-        background: #b85c38;
-        border-radius: 5px;
-        transition: width 0.15s ease;
-      }
+<div id="loader">
+  <div id="text">0 MB / ? MB</div>
+  <div id="bar"><div id="fill"></div></div>
+</div>
 
-      #unity-progress-label {
-        color: #9a8e88;
-        font-family: monospace;
-        font-size: 13px;
-        letter-spacing: 0.02em;
-      }
+<canvas id="unity-canvas"></canvas>
 
-      #unity-load-error {
-        display: none;
-        color: #e06050;
-        font-family: sans-serif;
-        font-size: 14px;
-        max-width: 480px;
-        text-align: center;
-      }
+<script src="Build/bb0d9ecdb05db3e84da20bd14a4f84dc.loader.js"></script>
 
-      #fullscreen-btn {
-        position: fixed;
-        top: 12px;
-        right: 12px;
-        z-index: 9999;
-        padding: 10px 14px;
-        background: #3a3435;
-        color: #c8c0b0;
-        border: 1px solid #5a5051;
-        border-radius: 6px;
-        cursor: pointer;
-        font-family: sans-serif;
-      }
-    </style>
-  </head>
+<script>
+const baseBuild = "https://cdn.jsdelivr.net/gh/wasm-rip/PlagueIncEvolved/Build/"
+const base = "https://cdn.jsdelivr.net/gh/wasm-rip/PlagueIncEvolved/"
 
-  <body>
-    <button id="fullscreen-btn">Fullscreen</button>
+let loaded = 0
+let totalGuess = 317 * 1024 * 1024
 
-    <div id="unity-loader">
-      <div id="unity-loader-title">Plague Inc: Evolved</div>
-      <div id="unity-progress-track">
-        <div id="unity-progress-bar-fill"></div>
-      </div>
-      <div id="unity-progress-label">0 MB / 0 MB</div>
-      <div id="unity-load-error"></div>
-    </div>
+function update() {
+  const mb = (loaded / 1024 / 1024).toFixed(1)
+  const total = (totalGuess / 1024 / 1024).toFixed(0)
+  document.getElementById("text").textContent = mb + " MB / " + total + " MB"
+  document.getElementById("fill").style.width = (loaded / totalGuess * 100) + "%"
+}
 
-    <canvas id="unity-canvas" tabindex="-1"></canvas>
+async function fetchPart(file, i) {
+  const url = baseBuild + file + ".part" + String(i).padStart(2, "0")
+  const res = await fetch(url)
+  if (!res.ok) return null
 
-    <script src="Build/bb0d9ecdb05db3e84da20bd14a4f84dc.loader.js"></script>
+  const buf = await res.arrayBuffer()
+  loaded += buf.byteLength
+  update()
+  return new Uint8Array(buf)
+}
 
-    <script>
-      const BASE = "https://cdn.jsdelivr.net/gh/wasm-rip/PlagueIncEvolved/"
-      async function fetchChunks(manifestUrl, onProgress) {
-        const manifestResp = await fetch(manifestUrl);
-        if (!manifestResp.ok) throw new Error(`Failed to load manifest: ${manifestResp.status}`);
-        const manifest = await manifestResp.json();
+async function loadFile(file) {
+  const first = await fetchPart(file, 0)
+  if (!first) return null
 
-        const totalBytes = manifest.files.reduce((sum, f) => sum + f.totalSize, 0);
-        let downloadedBytes = 0;
-        const resolvedFiles = {};
+  const parts = [first]
 
-        for (const fileEntry of manifest.files) {
-          const chunks = [];
+  for (let i = 1; ; i++) {
+    const p = await fetchPart(file, i)
+    if (!p) break
+    parts.push(p)
+  }
 
-          for (const part of fileEntry.parts) {
-            const resp = await fetch(BASE + "Build/" + part.file)
-            if (!resp.ok) throw new Error(`Failed to fetch ${part.file}: ${resp.status}`);
+  let size = 0
+  for (const p of parts) size += p.length
 
-            const reader = resp.body.getReader();
-            const partChunks = [];
-            let partReceived = 0;
+  const out = new Uint8Array(size)
+  let off = 0
 
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              partChunks.push(value);
-              partReceived += value.length;
-              downloadedBytes += value.length;
-              if (onProgress) onProgress(downloadedBytes, totalBytes);
-            }
+  for (const p of parts) {
+    out.set(p, off)
+    off += p.length
+  }
 
-            const partBuffer = new Uint8Array(part.size);
-            let offset = 0;
-            for (const chunk of partChunks) {
-              partBuffer.set(chunk, offset);
-              offset += chunk.length;
-            }
-            chunks.push(partBuffer);
-          }
+  return out.buffer
+}
 
-          const totalFileSize = chunks.reduce((s, c) => s + c.length, 0);
-          const assembled = new Uint8Array(totalFileSize);
-          let pos = 0;
+async function start() {
+  const wasm = await loadFile("1605eb800a276784e4a31d7e08c292ca.wasm")
+  const data = await loadFile("c68552511e0497caf31a2ee65f4f53e3.data")
 
-          for (const chunk of chunks) {
-            assembled.set(chunk, pos);
-            pos += chunk.length;
-          }
+  const wasmUrl = URL.createObjectURL(new Blob([wasm], { type: "application/wasm" }))
+  const dataUrl = URL.createObjectURL(new Blob([data]))
 
-          resolvedFiles[fileEntry.name] = URL.createObjectURL(new Blob([assembled]));
-        }
+  document.getElementById("loader").style.display = "none"
 
-        return resolvedFiles;
-      }
+  createUnityInstance(document.querySelector("#unity-canvas"), {
+    dataUrl: dataUrl,
+    frameworkUrl: baseBuild + "34cbf55c105d3d6cb061777c1afc3ae2.framework.js",
+    codeUrl: wasmUrl,
+    streamingAssetsUrl: base + "StreamingAssets",
+    companyName: "Ndemic Creations",
+    productName: "Plague Inc",
+    productVersion: "1.18.3.2"
+  })
+}
 
-      function formatBytes(bytes) {
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-      }
+start()
+</script>
 
-      function updateProgressBar(downloaded, total) {
-        const pct = total > 0 ? Math.min(100, (downloaded / total) * 100) : 0;
-        const bar = document.getElementById('unity-progress-bar-fill');
-        const label = document.getElementById('unity-progress-label');
-
-        if (bar) bar.style.width = pct + '%';
-        if (label) label.textContent = formatBytes(downloaded) + ' / ' + formatBytes(total);
-      }
-
-      async function loadUnity(config) {
-        const loader = document.getElementById('unity-loader');
-        const canvas = document.getElementById('unity-canvas');
-
-        if (loader) loader.style.display = 'flex';
-        if (canvas) canvas.style.display = 'none';
-
-        let resolvedFiles;
-
-        try {
-          resolvedFiles = await fetchChunks('Build/chunk_manifest.json', updateProgressBar);
-        } catch (err) {
-          const errEl = document.getElementById('unity-load-error');
-          if (errEl) {
-            errEl.textContent = 'Failed to load game: ' + err.message;
-            errEl.style.display = 'block';
-          }
-          throw err;
-        }
-
-        const finalConfig = Object.assign({}, config);
-
-        for (const [name, url] of Object.entries(resolvedFiles)) {
-          if (name.endsWith('.data')) finalConfig.dataUrl = url;
-          else if (name.endsWith('.wasm')) finalConfig.codeUrl = url;
-        }
-
-        if (loader) loader.style.display = 'none';
-        if (canvas) canvas.style.display = 'block';
-
-        return createUnityInstance(canvas, finalConfig);
-      }
-
-      function toggleFullscreen(element) {
-        if (!document.fullscreenElement) {
-          if (element.requestFullscreen) element.requestFullscreen();
-          else if (element.webkitRequestFullscreen) element.webkitRequestFullscreen();
-          else if (element.msRequestFullscreen) element.msRequestFullscreen();
-        } else {
-          if (document.exitFullscreen) document.exitFullscreen();
-          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-          else if (document.msExitFullscreen) document.msExitFullscreen();
-        }
-      }
-
-      document.getElementById('fullscreen-btn').addEventListener('click', () => {
-        toggleFullscreen(document.documentElement);
-      });
-    </script>
-
-    <script>
-      (function() {
-        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-          var meta = document.createElement('meta');
-          meta.name = 'viewport';
-          meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-          document.getElementsByTagName('head')[0].appendChild(meta);
-
-          var canvas = document.getElementById('unity-canvas');
-          canvas.style.position = 'fixed';
-        }
-        WebAssembly.instantiateStreaming = undefined;
-        loadUnity({
-          frameworkUrl: "Build/245c322b691cf5c1ae56fe216fda574e.framework.js",
-          streamingAssetsUrl: BASE+"StreamingAssets",
-          companyName: "Ndemic Creations",
-          productName: "Plague Inc Evolved",
-          productVersion: "1.18.3.2"
-        });
-      })();
-    </script>
-  </body>
+</body>
 </html>
